@@ -1,54 +1,46 @@
-FROM golang:1.20 AS builder
+FROM ghcr.io/qemu-tools/qemu-host as builder
 
-COPY serial/ /src/serial/
-WORKDIR /src/serial
-RUN go get -d -v golang.org/x/net/html  
-RUN CGO_ENABLED=0 GOOS=linux go build -a -installsuffix cgo -o /src/serial/main .
+#  FROM golang as builder
+#  WORKDIR /
+#  RUN git clone https://github.com/qemu-tools/qemu-host.git
+#  WORKDIR /qemu-host/src
+#  RUN go mod download
+#  RUN CGO_ENABLED=0 GOOS=linux go build -a -installsuffix cgo -o /qemu-host.bin .
 
-FROM debian:bookworm-20230320-slim
+FROM debian:bookworm-slim
+
+ARG DEBCONF_NOWARNINGS="yes"
+ARG DEBIAN_FRONTEND noninteractive
 
 RUN apt-get update && apt-get -y upgrade && \
-    apt-get --no-install-recommends -y install \
-	jq \
+	apt-get --no-install-recommends -y install \
 	curl \
 	cpio \
 	wget \
+	fdisk \
 	unzip \
+	socat \	
 	procps \
 	dnsmasq \
+	xz-utils \
 	iptables \
 	iproute2 \
-	xz-utils \
+	net-tools \
 	btrfs-progs \
-	bridge-utils \
 	netcat-openbsd \
 	ca-certificates \
 	qemu-system-x86 \
     && apt-get clean
 
-COPY run.sh /run/
-COPY disk.sh /run/
-COPY power.sh /run/
-COPY serial.sh /run/
-COPY server.sh /run/
-COPY install.sh /run/
-COPY network.sh /run/
+COPY run/*.sh /run/
+COPY agent/*.sh /agent/
 
-COPY agent/agent.sh /agent/
-COPY agent/service.sh /agent/
-
-COPY --from=builder /src/serial/main /run/serial.bin
+COPY --from=builder /qemu-host.bin /run/host.bin
 
 RUN ["chmod", "+x", "/run/run.sh"]
-RUN ["chmod", "+x", "/run/disk.sh"]
-RUN ["chmod", "+x", "/run/power.sh"]
-RUN ["chmod", "+x", "/run/serial.sh"]
+RUN ["chmod", "+x", "/run/check.sh"]
 RUN ["chmod", "+x", "/run/server.sh"]
-RUN ["chmod", "+x", "/run/install.sh"]
-RUN ["chmod", "+x", "/run/network.sh"]
-RUN ["chmod", "+x", "/run/serial.bin"]
-
-COPY disks/template.img.xz /data/
+RUN ["chmod", "+x", "/run/host.bin"]
 
 VOLUME /storage
 
@@ -58,14 +50,22 @@ EXPOSE 139
 EXPOSE 443 
 EXPOSE 445
 EXPOSE 5000
-EXPOSE 5001
 
-ENV CPU_CORES 1
-ENV DISK_SIZE 16G
-ENV RAM_SIZE 512M
+ENV CPU_CORES "1"
+ENV DISK_SIZE "16G"
+ENV RAM_SIZE "512M"
 
-#ENV URL https://global.synologydownload.com/download/DSM/beta/7.2/64216/DSM_VirtualDSM_64216.pat
-#ENV URL https://global.synologydownload.com/download/DSM/release/7.0.1/42218/DSM_VirtualDSM_42218.pat
-ENV URL https://global.synologydownload.com/download/DSM/release/7.1.1/42962-1/DSM_VirtualDSM_42962.pat
+ARG DATE_ARG=""
+ARG BUILD_ARG=0
+ARG VERSION_ARG="0.0"
+ENV VERSION=$VERSION_ARG
+
+LABEL org.opencontainers.image.created=${DATE_ARG}
+LABEL org.opencontainers.image.revision=${BUILD_ARG}
+LABEL org.opencontainers.image.version=${VERSION_ARG}
+LABEL org.opencontainers.image.source=https://github.com/kroese/virtual-dsm/
+LABEL org.opencontainers.image.url=https://hub.docker.com/r/kroese/virtual-dsm/
+
+HEALTHCHECK --interval=30s --retries=2 CMD /run/check.sh
 
 ENTRYPOINT ["/run/run.sh"]
